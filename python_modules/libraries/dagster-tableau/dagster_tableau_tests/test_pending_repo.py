@@ -8,6 +8,7 @@ from dagster._core.events import DagsterEventType
 from dagster._core.execution.api import create_execution_plan, execute_plan
 from dagster._core.instance_for_test import instance_for_test
 from dagster._utils import file_relative_path
+from dagster._utils.test import clean_location_load
 
 
 @pytest.mark.usefixtures("workspace_data_api_mocks_fn")
@@ -15,10 +16,7 @@ def test_using_cached_asset_data(
     workspace_data_api_mocks_fn: Callable,
 ) -> None:
     with instance_for_test() as instance:
-        from dagster_tableau_tests.pending_repo import (
-            pending_repo_from_cached_asset_metadata,
-            resource,
-        )
+        from dagster_tableau_tests.cacheable_asset_repo import resource
 
         # Must initialize the resource's client before passing it to the mock response function
         resource.build_client()
@@ -27,8 +25,9 @@ def test_using_cached_asset_data(
             resource._client = None
             assert len(response.calls) == 0
 
-            # first, we resolve the repository to generate our cached metadata
-            repository_def = pending_repo_from_cached_asset_metadata.compute_repository_definition()
+            repo_path = file_relative_path(__file__, "cacheable_asset_repo.py")
+            repository_def = clean_location_load(repo_path, "cacheable_asset_defs")
+
             # 4 calls to creates the defs
             assert len(response.calls) == 4
 
@@ -39,8 +38,8 @@ def test_using_cached_asset_data(
             repository_load_data = repository_def.repository_load_data
 
             recon_repo = ReconstructableRepository.for_file(
-                file_relative_path(__file__, "pending_repo.py"),
-                fn_name="pending_repo_from_cached_asset_metadata",
+                file_relative_path(__file__, "cacheable_asset_repo.py"),
+                fn_name="cacheable_asset_defs",
             )
             recon_job = ReconstructableJob(repository=recon_repo, job_name="all_asset_job")
 

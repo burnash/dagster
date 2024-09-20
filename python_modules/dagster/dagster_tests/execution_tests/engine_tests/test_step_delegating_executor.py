@@ -5,23 +5,10 @@ import threading
 import time
 
 import pytest
-from dagster import (
-    AssetKey,
-    AssetsDefinition,
-    DagsterInstance,
-    asset,
-    define_asset_job,
-    executor,
-    job,
-    op,
-    reconstructable,
-    repository,
-)
+from dagster import executor, job, op, reconstructable
 from dagster._config import Permissive
-from dagster._core.definitions.cacheable_assets import CacheableAssetsDefinition
 from dagster._core.definitions.executor_definition import multiple_process_executor_requirements
 from dagster._core.definitions.reconstruct import ReconstructableJob, ReconstructableRepository
-from dagster._core.definitions.repository_definition import AssetsDefinitionCacheableData
 from dagster._core.events import DagsterEventType
 from dagster._core.execution.api import ReexecutionOptions, execute_job
 from dagster._core.execution.retries import RetryMode
@@ -33,6 +20,7 @@ from dagster._core.executor.step_delegating import (
 from dagster._core.storage.tags import GLOBAL_CONCURRENCY_TAG
 from dagster._core.test_utils import environ, instance_for_test
 from dagster._utils.merger import merge_dicts
+from dagster._utils.test import temp_definitions_load_context
 
 from dagster_tests.execution_tests.engine_tests.retry_jobs import (
     assert_expected_failure_behavior,
@@ -371,93 +359,55 @@ def test_execute_using_repository_data():
     TestStepHandler.reset()
     with instance_for_test() as instance:
         recon_repo = ReconstructableRepository.for_module(
-            "dagster_tests.execution_tests.engine_tests.test_step_delegating_executor",
-            fn_name="pending_repo",
+            "dagster_tests.execution_tests.engine_tests.cacheable_asset_repo",
+            fn_name="cacheable_asset_repo",
             working_directory=os.path.join(os.path.dirname(__file__), "..", "..", ".."),
         )
         recon_job = ReconstructableJob(repository=recon_repo, job_name="all_asset_job")
 
-        with execute_job(
-            recon_job,
-            instance=instance,
-        ) as result:
-            call_counts = instance.run_storage.get_cursor_values(
-                {"compute_cacheable_data_called", "get_definitions_called"}
-            )
-            assert call_counts.get("compute_cacheable_data_called") == "1"
-            assert call_counts.get("get_definitions_called") == "5"
-            TestStepHandler.wait_for_processes()
+        with temp_definitions_load_context():
+            with execute_job(
+                recon_job,
+                instance=instance,
+            ) as result:
+                call_counts = instance.run_storage.get_cursor_values(
+                    {"compute_cacheable_data_called", "get_definitions_called"}
+                )
+                assert call_counts.get("compute_cacheable_data_called") == "1"
+                assert call_counts.get("get_definitions_called") == "3"
+                TestStepHandler.wait_for_processes()
 
-            assert any(
-                [
-                    "Starting execution with step handler TestStepHandler" in (event.message or "")
-                    for event in result.all_events
-                ]
-            )
-            assert result.success
-            parent_run_id = result.run_id
+                assert any(
+                    [
+                        "Starting execution with step handler TestStepHandler"
+                        in (event.message or "")
+                        for event in result.all_events
+                    ]
+                )
+                assert result.success
+                parent_run_id = result.run_id
 
-        with execute_job(
-            recon_job,
-            reexecution_options=ReexecutionOptions(parent_run_id=parent_run_id),
-            instance=instance,
-        ) as result:
-            TestStepHandler.wait_for_processes()
+            with execute_job(
+                recon_job,
+                reexecution_options=ReexecutionOptions(parent_run_id=parent_run_id),
+                instance=instance,
+            ) as result:
+                TestStepHandler.wait_for_processes()
 
-            assert any(
-                [
-                    "Starting execution with step handler TestStepHandler" in (event.message or "")
-                    for event in result.all_events
-                ]
-            )
-            assert result.success
-            # we do not attempt to fetch the previous repository load data off of the execution plan
-            # from the previous run, so the reexecution will require us to fetch the metadata again
-            call_counts = instance.run_storage.get_cursor_values(
-                {"compute_cacheable_data_called", "get_definitions_called"}
-            )
-            assert call_counts.get("compute_cacheable_data_called") == "2"
+                assert any(
+                    [
+                        "Starting execution with step handler TestStepHandler"
+                        in (event.message or "")
+                        for event in result.all_events
+                    ]
+                )
+                assert result.success
+                call_counts = instance.run_storage.get_cursor_values(
+                    {"compute_cacheable_data_called", "get_definitions_called"}
+                )
+                assert call_counts.get("compute_cacheable_data_called") == "1"
 
-            assert call_counts.get("get_definitions_called") == "9"
-
-
-class MyCacheableAssetsDefinition(CacheableAssetsDefinition):
-    _cacheable_data = AssetsDefinitionCacheableData(keys_by_output_name={"result": AssetKey("foo")})
-
-    def compute_cacheable_data(self):
-        # used for tracking how many times this function gets called over an execution
-        instance = DagsterInstance.get()
-        kvs_key = "compute_cacheable_data_called"
-        num_called = int(instance.run_storage.get_cursor_values({kvs_key}).get(kvs_key, "0"))
-        instance.run_storage.set_cursor_values({kvs_key: str(num_called + 1)})
-        return [self._cacheable_data]
-
-    def build_definitions(self, data):
-        assert len(data) == 1
-        assert data == [self._cacheable_data]
-        # used for tracking how many times this function gets called over an execution
-        instance = DagsterInstance.get()
-        kvs_key = "get_definitions_called"
-        num_called = int(instance.run_storage.get_cursor_values({kvs_key}).get(kvs_key, "0"))
-        instance.run_storage.set_cursor_values({kvs_key: str(num_called + 1)})
-
-        @op
-        def _op():
-            return 1
-
-        return [
-            AssetsDefinition.from_op(_op, keys_by_output_name=cd.keys_by_output_name) for cd in data
-        ]
-
-
-@asset
-def bar(foo):
-    return foo + 1
-
-
-@repository(default_executor_def=test_step_delegating_executor)
-def pending_repo():
-    return [bar, MyCacheableAssetsDefinition("xyz"), define_asset_job("all_asset_job")]
+                assert call_counts.get("get_definitions_called") == "5"
 
 
 def get_dynamic_resource_init_failure_job():

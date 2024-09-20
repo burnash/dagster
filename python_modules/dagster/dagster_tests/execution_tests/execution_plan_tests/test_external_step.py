@@ -9,8 +9,6 @@ from typing import List
 import pytest
 from dagster import (
     AssetCheckResult,
-    AssetKey,
-    AssetsDefinition,
     DynamicOut,
     DynamicOutput,
     Failure,
@@ -27,16 +25,10 @@ from dagster import (
     job,
     op,
     reconstructable,
-    repository,
     resource,
-    with_resources,
 )
 from dagster._core.definitions.asset_check_spec import AssetCheckSpec
 from dagster._core.definitions.asset_graph import AssetGraph
-from dagster._core.definitions.cacheable_assets import (
-    AssetsDefinitionCacheableData,
-    CacheableAssetsDefinition,
-)
 from dagster._core.definitions.job_definition import JobDefinition
 from dagster._core.definitions.metadata import MetadataValue
 from dagster._core.definitions.no_step_launcher import no_step_launcher
@@ -678,8 +670,8 @@ def test_multiproc_launcher_with_repository_load_data():
         with instance_for_test() as instance:
             instance.run_storage.set_cursor_values({"val": "INITIAL_VALUE"})
             recon_repo = ReconstructableRepository.for_file(
-                file_relative_path(__file__, "test_external_step.py"),
-                fn_name="pending_repo",
+                file_relative_path(__file__, "cacheable_asset_repo.py"),
+                fn_name="cacheable_asset_repo",
             )
             recon_job = ReconstructableJob(repository=recon_repo, job_name="all_asset_job")
 
@@ -690,47 +682,3 @@ def test_multiproc_launcher_with_repository_load_data():
             ) as result:
                 assert result.success
                 assert instance.run_storage.get_cursor_values({"val"}).get("val") == "NEW_VALUE"
-
-
-class MyCacheableAssetsDefinition(CacheableAssetsDefinition):
-    _cacheable_data = AssetsDefinitionCacheableData(keys_by_output_name={"result": AssetKey("foo")})
-
-    def compute_cacheable_data(self):
-        # used for tracking how many times this function gets called over an execution
-        # since we're crossing process boundaries, we pre-populate this value in the host process
-        # and assert that this pre-populated value is present, to ensure that we'll error if this
-        # gets called in a child process
-        instance = DagsterInstance.get()
-        val = instance.run_storage.get_cursor_values({"val"}).get("val")
-        assert val == "INITIAL_VALUE"
-        instance.run_storage.set_cursor_values({"val": "NEW_VALUE"})
-        return [self._cacheable_data]
-
-    def build_definitions(self, data):
-        assert len(data) == 1
-        assert data == [self._cacheable_data]
-
-        @op(required_resource_keys={"step_launcher"})
-        def _op():
-            return 1
-
-        return with_resources(
-            [
-                AssetsDefinition.from_op(
-                    _op,
-                    keys_by_output_name=cd.keys_by_output_name,
-                )
-                for cd in data
-            ],
-            {"step_launcher": local_external_step_launcher},
-        )
-
-
-@asset
-def bar(foo):
-    return foo + 1
-
-
-@repository
-def pending_repo():
-    return [bar, MyCacheableAssetsDefinition("xyz"), define_asset_job("all_asset_job")]

@@ -1,9 +1,25 @@
+import inspect
 import os
 import shutil
+import sys
 import tempfile
+import textwrap
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import Any, Dict, List, Mapping, Optional, Set, Type, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Set,
+    Type,
+    Union,
+    cast,
+)
 
 # top-level include is dangerous in terms of incurring circular deps
 from dagster import (
@@ -14,6 +30,7 @@ from dagster import (
 )
 from dagster._config import Field, StringSource
 from dagster._config.config_schema import UserConfigSchema
+from dagster._core.code_pointer import CodePointer
 from dagster._core.definitions import (
     GraphDefinition,
     InputMapping,
@@ -21,10 +38,13 @@ from dagster._core.definitions import (
     OpDefinition,
     OutputMapping,
 )
+from dagster._core.definitions.definitions_load_context import DefinitionsLoadType
 from dagster._core.definitions.dependency import Node
 from dagster._core.definitions.executor_definition import in_process_executor
 from dagster._core.definitions.job_base import InMemoryJob
 from dagster._core.definitions.logger_definition import LoggerDefinition
+from dagster._core.definitions.reconstruct import repository_def_from_pointer
+from dagster._core.definitions.repository_definition.repository_definition import RepositoryLoadData
 from dagster._core.definitions.resource_definition import ScopedResourcesBuilder
 from dagster._core.events import DagsterEventType
 from dagster._core.execution.api import create_execution_plan
@@ -47,6 +67,12 @@ from dagster._core.utility_ops import create_stub_op
 from dagster._serdes import ConfigurableClass
 from dagster._serdes.config_class import ConfigurableClassData
 from dagster._utils.concurrency import ConcurrencyClaimStatus
+
+if TYPE_CHECKING:
+    from dagster._core.definitions.definitions_load_context import DefinitionsLoadContext
+    from dagster._core.definitions.repository_definition.repository_definition import (
+        RepositoryDefinition,
+    )
 
 # re-export
 from dagster._utils.temp_file import (
@@ -358,3 +384,61 @@ def get_all_direct_subclasses_of_marker(marker_interface_cls: Type) -> List[Type
         and marker_interface_cls
         in symbol.__bases__  # ensure that the class is a direct subclass of marker_interface_cls (not a subclass of a subclass)
     ]
+
+
+def clean_location_load(
+    file_path: str, attribute: str, repository_load_data: Optional[RepositoryLoadData] = None
+) -> "RepositoryDefinition":
+    pointer = CodePointer.from_python_file(file_path, attribute, None)
+    module_name = os.path.splitext(os.path.basename(file_path))[0]
+    load_type = (
+        DefinitionsLoadType.RECONSTRUCTION
+        if repository_load_data
+        else DefinitionsLoadType.INITIALIZATION
+    )
+    with clear_python_module_cache(module_name):
+        repo = repository_def_from_pointer(pointer, load_type, repository_load_data)
+    return repo
+
+
+@contextmanager
+def temp_definitions_load_context(
+    context: Optional["DefinitionsLoadContext"] = None,
+) -> Iterator["DefinitionsLoadContext"]:
+    from dagster._core.definitions.definitions_load_context import (
+        DefinitionsLoadContext,
+        DefinitionsLoadType,
+    )
+
+    context = context or DefinitionsLoadContext(DefinitionsLoadType.INITIALIZATION)
+    curr_context = DefinitionsLoadContext.get()
+    try:
+        DefinitionsLoadContext.set(context)
+        yield context
+    finally:
+        DefinitionsLoadContext.set(curr_context)
+
+
+@contextmanager
+def clear_python_module_cache(module: str) -> Iterator[None]:
+    current = None
+    if module in sys.modules:
+        current = sys.modules[module]
+        del sys.modules[module]
+    try:
+        yield
+    finally:
+        if current:
+            sys.modules[module] = current
+        elif module in sys.modules:
+            del sys.modules[module]
+
+
+@contextmanager
+def temp_script(script_fn: Callable[[], Any]) -> Iterator[str]:
+    # drop the signature line
+    source = textwrap.dedent(inspect.getsource(script_fn).split("\n", 1)[1])
+    with tempfile.NamedTemporaryFile(suffix=".py") as file:
+        file.write(source.encode())
+        file.flush()
+        yield file.name

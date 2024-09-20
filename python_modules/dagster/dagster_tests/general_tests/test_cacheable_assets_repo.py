@@ -1,9 +1,10 @@
+import sys
+
 import dagster._check as check
 import pytest
 from dagster import (
     AssetKey,
     AssetsDefinition,
-    AssetSelection,
     DagsterInvalidDefinitionError,
     JobDefinition,
     RepositoryDefinition,
@@ -11,90 +12,51 @@ from dagster import (
     define_asset_job,
     op,
     repository,
-    resource,
-    with_resources,
 )
+from dagster._core.code_pointer import CodePointer
+from dagster._core.definitions.asset_selection import AssetSelection
 from dagster._core.definitions.cacheable_assets import (
     AssetsDefinitionCacheableData,
     CacheableAssetsDefinition,
 )
-from dagster._core.definitions.repository_definition import (
-    PendingRepositoryDefinition,
-    RepositoryLoadData,
+from dagster._core.definitions.definitions_load_context import DefinitionsLoadType
+from dagster._core.definitions.reconstruct import repository_def_from_pointer
+from dagster._core.definitions.repository_definition import RepositoryLoadData
+from dagster._core.definitions.resource_definition import resource
+from dagster._core.execution.with_resources import with_resources
+from dagster._utils import file_relative_path
+from dagster._utils.test import temp_definitions_load_context
+
+cacheable_asset_repo_path = file_relative_path(__file__, "cacheable_asset_repo.py")
+cacheable_asset_repo_pointer = CodePointer.from_python_file(
+    python_file=cacheable_asset_repo_path,
+    definition="cacheable_asset_repo",
+    working_directory=None,
 )
 
-from dagster_tests.general_tests.test_repository import (
-    define_empty_job,
-    define_simple_job,
-    define_with_resources_job,
-)
+
+@pytest.fixture
+def clear_cacheable_asset_repo_from_module_cache():
+    if "cacheable_asset_repo" in sys.modules:
+        del sys.modules["cacheable_asset_repo"]
 
 
-def define_cacheable_and_uncacheable_assets():
-    class MyCacheableAssets(CacheableAssetsDefinition):
-        def compute_cacheable_data(self):
-            return [
-                AssetsDefinitionCacheableData(
-                    keys_by_input_name={"upstream": AssetKey("upstream")},
-                    keys_by_output_name={"result": AssetKey(self.unique_id)},
-                )
-            ]
-
-        def build_definitions(self, data):
-            @op(name=self.unique_id)
-            def _op(upstream):
-                return upstream + 1
-
-            return [
-                AssetsDefinition.from_op(
-                    _op,
-                    keys_by_input_name=cd.keys_by_input_name,
-                    keys_by_output_name=cd.keys_by_output_name,
-                )
-                for cd in data
-            ]
-
-    @asset
-    def upstream():
-        return 1
-
-    @asset
-    def downstream(a, b):
-        return a + b
-
-    return [MyCacheableAssets("a"), MyCacheableAssets("b"), upstream, downstream]
-
-
-@repository
-def pending_repo():
-    return [
-        define_empty_job(),
-        define_simple_job(),
-        *define_with_resources_job(),
-        define_cacheable_and_uncacheable_assets(),
-        define_asset_job(
-            "all_asset_job",
-            selection=AssetSelection.assets(
-                AssetKey("a"), AssetKey("b"), AssetKey("upstream"), AssetKey("downstream")
-            ),
-        ),
-    ]
-
-
+@pytest.mark.usefixtures("clear_cacheable_asset_repo_from_module_cache")
 def test_resolve_empty():
-    assert isinstance(pending_repo, PendingRepositoryDefinition)
-    with pytest.raises(check.CheckError):
-        repo = pending_repo.reconstruct_repository_definition(repository_load_data=None)
-    repo = pending_repo.compute_repository_definition()
+    repo = repository_def_from_pointer(
+        cacheable_asset_repo_pointer, DefinitionsLoadType.INITIALIZATION
+    )
     assert isinstance(repo, RepositoryDefinition)
     assert isinstance(repo.get_job("simple_job"), JobDefinition)
     assert isinstance(repo.get_job("all_asset_job"), JobDefinition)
 
 
+@pytest.mark.usefixtures("clear_cacheable_asset_repo_from_module_cache")
 def test_resolve_missing_key():
-    assert isinstance(pending_repo, PendingRepositoryDefinition)
     with pytest.raises(check.CheckError, match="No metadata found"):
-        pending_repo.reconstruct_repository_definition(
+        repository_def_from_pointer(
+            cacheable_asset_repo_pointer,
+            DefinitionsLoadType.RECONSTRUCTION,
             repository_load_data=RepositoryLoadData(
                 cacheable_asset_data={
                     "a": [
@@ -104,12 +66,12 @@ def test_resolve_missing_key():
                         )
                     ]
                 }
-            )
+            ),
         )
 
 
+@pytest.mark.usefixtures("clear_cacheable_asset_repo_from_module_cache")
 def test_resolve_wrong_data():
-    assert isinstance(pending_repo, PendingRepositoryDefinition)
     with pytest.raises(
         DagsterInvalidDefinitionError,
         match=(
@@ -117,7 +79,9 @@ def test_resolve_wrong_data():
             r" of the provided sources"
         ),
     ):
-        pending_repo.reconstruct_repository_definition(
+        repository_def_from_pointer(
+            cacheable_asset_repo_pointer,
+            DefinitionsLoadType.RECONSTRUCTION,
             repository_load_data=RepositoryLoadData(
                 cacheable_asset_data={
                     "a": [
@@ -133,14 +97,14 @@ def test_resolve_wrong_data():
                         )
                     ],
                 }
-            )
+            ),
         )
 
 
 def define_uncacheable_and_resource_dependent_cacheable_assets():
     class ResourceDependentCacheableAsset(CacheableAssetsDefinition):
         def __init__(self):
-            super().__init__("res_downstream")
+            super().__init__("res_midstream")
 
         def compute_cacheable_data(self):
             return [
@@ -179,48 +143,52 @@ def test_resolve_no_resources():
     """Test that loading a repo with a resource-dependent cacheable asset fails if the resource is not
     provided.
     """
-    with pytest.raises(DagsterInvalidDefinitionError):
-        try:
+    with temp_definitions_load_context():
+        with pytest.raises(DagsterInvalidDefinitionError):
+            try:
 
-            @repository
-            def resource_dependent_repo_no_resources():
-                return [
-                    define_uncacheable_and_resource_dependent_cacheable_assets(),
-                    define_asset_job(
-                        "all_asset_job",
-                    ),
-                ]
+                @repository
+                def resource_dependent_repo_no_resources():
+                    return [
+                        define_uncacheable_and_resource_dependent_cacheable_assets(),
+                        define_asset_job(
+                            "all_asset_job",
+                        ),
+                    ]
 
-            resource_dependent_repo_no_resources.compute_repository_definition().get_all_jobs()
-        except DagsterInvalidDefinitionError as e:
-            # Make sure we get an error for the cacheable asset in particular
-            assert "res_midstream" in str(e)
-            raise e
+                resource_dependent_repo_no_resources.get_all_jobs()
+            except DagsterInvalidDefinitionError as e:
+                # Make sure we get an error for the cacheable asset in particular
+                assert "res_midstream" in str(e)
+                raise e
 
 
 def test_resolve_with_resources():
     """Test that loading a repo with a resource-dependent cacheable asset succeeds if the resource is
     provided.
     """
+    with temp_definitions_load_context():
 
-    @resource
-    def foo_resource():
-        return 3
+        @resource
+        def foo_resource():
+            return 3
 
-    @repository
-    def resource_dependent_repo_with_resources():
-        return [
-            with_resources(
-                define_uncacheable_and_resource_dependent_cacheable_assets(), {"foo": foo_resource}
-            ),
-            define_asset_job(
-                "all_asset_job",
-            ),
-        ]
+        @repository
+        def resource_dependent_repo_with_resources():
+            return [
+                with_resources(
+                    define_uncacheable_and_resource_dependent_cacheable_assets(),
+                    {"foo": foo_resource},
+                ),
+                define_asset_job(
+                    "all_asset_job",
+                ),
+            ]
 
-    repo = resource_dependent_repo_with_resources.compute_repository_definition()
-    assert isinstance(repo, RepositoryDefinition)
-    assert isinstance(repo.get_job("all_asset_job"), JobDefinition)
+        assert isinstance(resource_dependent_repo_with_resources, RepositoryDefinition)
+        assert isinstance(
+            resource_dependent_repo_with_resources.get_job("all_asset_job"), JobDefinition
+        )
 
 
 def test_group_cached_assets():
@@ -299,28 +267,30 @@ def test_multiple_wrapped_cached_assets():
         )
     ]
 
-    @repository
-    def resource_dependent_repo_with_resources():
-        return [
-            my_cacheable_assets_with_group_and_asset,
-            define_asset_job(
-                "all_asset_job",
-            ),
-        ]
+    with temp_definitions_load_context():
 
-    repo = resource_dependent_repo_with_resources.compute_repository_definition()
-    assert isinstance(repo, RepositoryDefinition)
-    assert isinstance(repo.get_job("all_asset_job"), JobDefinition)
+        @repository
+        def resource_dependent_repo_with_resources():
+            return [
+                my_cacheable_assets_with_group_and_asset,
+                define_asset_job(
+                    "all_asset_job",
+                ),
+            ]
 
-    my_cool_group_sel = AssetSelection.groups("my_cool_group")
-    assert (
-        len(
-            my_cool_group_sel.resolve(
-                my_cacheable_assets_with_group_and_asset[0].build_definitions(
-                    my_cacheable_assets_with_group_and_asset[0].compute_cacheable_data()
+        repo = resource_dependent_repo_with_resources
+        assert isinstance(repo, RepositoryDefinition)
+        assert isinstance(repo.get_job("all_asset_job"), JobDefinition)
+
+        my_cool_group_sel = AssetSelection.groups("my_cool_group")
+        assert (
+            len(
+                my_cool_group_sel.resolve(
+                    my_cacheable_assets_with_group_and_asset[0].build_definitions(
+                        my_cacheable_assets_with_group_and_asset[0].compute_cacheable_data()
+                    )
+                    + my_cacheable_assets_with_group_and_asset[1:]
                 )
-                + my_cacheable_assets_with_group_and_asset[1:]
             )
+            == 1
         )
-        == 1
-    )
