@@ -21,8 +21,11 @@ from dagster._serdes.serdes import deserialize_value, serialize_value
 from dagster_airlift.constants import TASK_MAPPING_METADATA_KEY
 from dagster_airlift.core import (
     build_defs_from_airflow_instance as build_defs_from_airflow_instance,
+    dag_defs,
+    task_defs,
 )
 from dagster_airlift.core.airflow_defs_data import AirflowDefinitionsData
+from dagster_airlift.core.multiple_tasks import targeted_by_multiple_tasks
 from dagster_airlift.core.serialization.compute import compute_serialized_data, is_mapped_asset_spec
 from dagster_airlift.core.serialization.serialized_data import (
     KeyScopedDataItem,
@@ -427,7 +430,7 @@ def test_multiple_tasks_per_asset(init_load_context: None) -> None:
     assert has_single_task_handle(b_spec, "dag2", "task2")
 
 
-def test_multiple_tasks_to_single_asset() -> None:
+def test_multiple_tasks_to_single_asset_metadata() -> None:
     instance = make_instance({"dag1": ["task1"], "dag2": ["task2"]})
 
     @asset(
@@ -453,3 +456,39 @@ def test_multiple_tasks_to_single_asset() -> None:
         {"dag_id": "dag1", "task_id": "task1"},
         {"dag_id": "dag2", "task_id": "task2"},
     ]
+
+
+def test_multiple_tasks_dag_defs() -> None:
+    @asset
+    def other_asset() -> None: ...
+
+    @asset(deps=[other_asset])
+    def scheduled_twice() -> None: ...
+
+    defs = build_defs_from_airflow_instance(
+        airflow_instance=make_instance(
+            {"weekly_dag": ["task1"], "daily_dag": ["task1"], "other_dag": ["task1"]}
+        ),
+        defs=Definitions.merge(
+            dag_defs(
+                "other_dag",
+                task_defs(
+                    "task1",
+                    Definitions(assets=[other_asset]),
+                ),
+            ),
+            Definitions(
+                assets=[
+                    targeted_by_multiple_tasks(
+                        scheduled_twice,
+                        task_handles=[
+                            {"dag_id": "weekly_dag", "task_id": "task1"},
+                            {"dag_id": "daily_dag", "task_id": "task1"},
+                        ],
+                    )
+                ]
+            ),
+        ),
+    )
+
+    Definitions.validate_loadable(defs)
