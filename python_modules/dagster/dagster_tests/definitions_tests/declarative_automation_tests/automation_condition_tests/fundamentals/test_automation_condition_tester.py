@@ -19,21 +19,19 @@ from dagster._core.instance import DagsterInstance
 
 @asset(
     partitions_def=HourlyPartitionsDefinition("2020-01-01-00:00"),
-    auto_materialize_policy=AutomationCondition.eager().as_auto_materialize_policy(),
+    automation_condition=AutomationCondition.eager(),
 )
 def hourly() -> None: ...
 
 
 @asset(
     partitions_def=StaticPartitionsDefinition(["a", "b", "c"]),
-    auto_materialize_policy=AutomationCondition.eager().as_auto_materialize_policy(),
+    automation_condition=AutomationCondition.on_missing(),
 )
 def static() -> None: ...
 
 
-@asset(
-    auto_materialize_policy=AutomationCondition.eager().as_auto_materialize_policy(),
-)
+@asset(automation_condition=AutomationCondition.on_missing())
 def unpartitioned() -> None: ...
 
 
