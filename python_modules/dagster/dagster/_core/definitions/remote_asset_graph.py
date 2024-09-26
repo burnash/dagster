@@ -36,9 +36,9 @@ from dagster._core.definitions.freshness_policy import FreshnessPolicy
 from dagster._core.definitions.metadata import ArbitraryMetadataMapping
 from dagster._core.definitions.partition import PartitionsDefinition
 from dagster._core.definitions.partition_mapping import PartitionMapping
+from dagster._core.definitions.selector import RepositorySelector
 from dagster._core.definitions.utils import DEFAULT_GROUP_NAME
 from dagster._core.remote_representation.external import ExternalRepository
-from dagster._core.remote_representation.handle import RepositoryHandle
 
 if TYPE_CHECKING:
     from dagster._core.remote_representation.external_data import (
@@ -55,7 +55,7 @@ class RemoteAssetNode(BaseAssetNode):
         parent_keys: AbstractSet[AssetKey],
         child_keys: AbstractSet[AssetKey],
         execution_set_keys: AbstractSet[EntityKey],
-        repo_node_pairs: Sequence[Tuple[RepositoryHandle, "ExternalAssetNode"]],
+        repo_node_pairs: Sequence[Tuple[RepositorySelector, "ExternalAssetNode"]],
         check_keys: AbstractSet[AssetCheckKey],
     ):
         self.key = key
@@ -178,7 +178,7 @@ class RemoteAssetNode(BaseAssetNode):
         return self.priority_node.job_names if self.is_executable else []
 
     @property
-    def priority_repository_handle(self) -> RepositoryHandle:
+    def priority_repository_selector(self) -> RepositorySelector:
         # This property supports existing behavior but it should be phased out, because it relies on
         # materialization nodes shadowing observation nodes that would otherwise be exposed.
         return next(
@@ -190,11 +190,11 @@ class RemoteAssetNode(BaseAssetNode):
         )
 
     @property
-    def repository_handles(self) -> Sequence[RepositoryHandle]:
+    def repository_selectors(self) -> Sequence[RepositorySelector]:
         return [repo_handle for repo_handle, _ in self._repo_node_pairs]
 
     @property
-    def repo_node_pairs(self) -> Sequence[Tuple[RepositoryHandle, "ExternalAssetNode"]]:
+    def repo_node_pairs(self) -> Sequence[Tuple[RepositorySelector, "ExternalAssetNode"]]:
         return self._repo_node_pairs
 
     @cached_property
@@ -235,7 +235,7 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
         asset_nodes_by_key: Mapping[AssetKey, RemoteAssetNode],
         asset_checks_by_key: Mapping[AssetCheckKey, "ExternalAssetCheck"],
         asset_check_execution_sets_by_key: Mapping[AssetCheckKey, AbstractSet[EntityKey]],
-        repository_handles_by_asset_check_key: Mapping[AssetCheckKey, RepositoryHandle],
+        repository_selectors_by_asset_check_key: Mapping[AssetCheckKey, RepositorySelector],
     ):
         self._asset_nodes_by_key = asset_nodes_by_key
         self._asset_checks_by_key = asset_checks_by_key
@@ -244,13 +244,13 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
             for k, v in asset_checks_by_key.items()
         }
         self._asset_check_execution_sets_by_key = asset_check_execution_sets_by_key
-        self._repository_handles_by_asset_check_key = repository_handles_by_asset_check_key
+        self._repository_handles_by_asset_check_key = repository_selectors_by_asset_check_key
 
     @classmethod
-    def from_repository_handles_and_external_asset_nodes(
+    def from_repository_selectors_and_external_asset_nodes(
         cls,
-        repo_handle_assets: Sequence[Tuple[RepositoryHandle, "ExternalAssetNode"]],
-        repo_handle_asset_checks: Sequence[Tuple[RepositoryHandle, "ExternalAssetCheck"]],
+        repo_handle_assets: Sequence[Tuple[RepositorySelector, "ExternalAssetNode"]],
+        repo_handle_asset_checks: Sequence[Tuple[RepositorySelector, "ExternalAssetCheck"]],
     ) -> "RemoteAssetGraph":
         _warn_on_duplicate_nodes(repo_handle_assets)
 
@@ -262,11 +262,11 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
         asset_checks = [asset_check for _, asset_check in repo_handle_asset_checks]
         execution_sets_by_key = _build_execution_set_index(assets, asset_checks)
 
-        # Index all (RepositoryHandle, ExternalAssetNode) pairs by their asset key, then use this to
+        # Index all (RepositorySelector, ExternalAssetNode) pairs by their asset key, then use this to
         # build the set of RemoteAssetNodes (indexed by key). Each RemoteAssetNode wraps the set of
         # pairs for an asset key.
         repo_node_pairs_by_key: Dict[
-            AssetKey, List[Tuple[RepositoryHandle, "ExternalAssetNode"]]
+            AssetKey, List[Tuple[RepositorySelector, "ExternalAssetNode"]]
         ] = defaultdict(list)
 
         # Build the dependency graph of asset keys.
@@ -274,8 +274,8 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
         upstream: Dict[AssetKey, Set[AssetKey]] = {key: set() for key in all_keys}
         downstream: Dict[AssetKey, Set[AssetKey]] = {key: set() for key in all_keys}
 
-        for repo_handle, node in repo_handle_assets:
-            repo_node_pairs_by_key[node.asset_key].append((repo_handle, node))
+        for selector, node in repo_handle_assets:
+            repo_node_pairs_by_key[node.asset_key].append((selector, node))
             for dep in node.dependencies:
                 upstream[node.asset_key].add(dep.upstream_asset_key)
                 downstream[dep.upstream_asset_key].add(node.asset_key)
@@ -286,11 +286,11 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
         # each asset check key.
         check_keys_by_asset_key: Dict[AssetKey, Set[AssetCheckKey]] = defaultdict(set)
         asset_checks_by_key: Dict[AssetCheckKey, "ExternalAssetCheck"] = {}
-        repository_handles_by_asset_check_key: Dict[AssetCheckKey, RepositoryHandle] = {}
+        repository_handles_by_asset_check_key: Dict[AssetCheckKey, RepositorySelector] = {}
         for repo_handle, asset_check in repo_handle_asset_checks:
             asset_checks_by_key[asset_check.key] = asset_check
             check_keys_by_asset_key[asset_check.asset_key].add(asset_check.key)
-            repository_handles_by_asset_check_key[asset_check.key] = repo_handle
+            repository_handles_by_asset_check_key[asset_check.key] = selector
 
         asset_check_execution_sets_by_key = {
             k: v for k, v in execution_sets_by_key.items() if isinstance(k, AssetCheckKey)
@@ -351,14 +351,16 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
         return {job_name for node in self.asset_nodes for job_name in node.job_names}
 
     @cached_property
-    def repository_handles_by_key(self) -> Mapping[EntityKey, RepositoryHandle]:
+    def repository_selectors_by_key(self) -> Mapping[EntityKey, RepositorySelector]:
         return {
-            **{k: node.priority_repository_handle for k, node in self._asset_nodes_by_key.items()},
+            **{
+                k: node.priority_repository_selector for k, node in self._asset_nodes_by_key.items()
+            },
             **self._repository_handles_by_asset_check_key,
         }
 
-    def get_repository_handle(self, key: EntityKey) -> RepositoryHandle:
-        return self.repository_handles_by_key[key]
+    def get_repository_selector(self, key: EntityKey) -> RepositorySelector:
+        return self.repository_selectors_by_key[key]
 
     def get_materialization_job_names(self, asset_key: AssetKey) -> Sequence[str]:
         """Returns the names of jobs that materialize this asset."""
@@ -391,28 +393,28 @@ class RemoteAssetGraph(BaseAssetGraph[RemoteAssetNode]):
     ) -> Sequence[AbstractSet[EntityKey]]:
         keys_by_repo = defaultdict(set)
         for key in keys:
-            repo_handle = self.get_repository_handle(key)
+            repo_handle = self.get_repository_selector(key)
             keys_by_repo[(repo_handle.location_name, repo_handle.repository_name)].add(key)
         return list(keys_by_repo.values())
 
 
 def _warn_on_duplicate_nodes(
-    repo_handle_external_asset_nodes: Sequence[Tuple[RepositoryHandle, "ExternalAssetNode"]],
+    repo_selector_external_asset_nodes: Sequence[Tuple[RepositorySelector, "ExternalAssetNode"]],
 ) -> None:
     # Split the nodes into materializable, observable, and unexecutable nodes. Observable and
     # unexecutable `ExternalAssetNode` represent both source and external assets-- the
     # "External" in "ExternalAssetNode" is unrelated to the "external" in "external asset", this
     # is just an unfortunate naming collision. `ExternalAssetNode` will be renamed eventually.
-    materializable_node_pairs: List[Tuple[RepositoryHandle, "ExternalAssetNode"]] = []
-    observable_node_pairs: List[Tuple[RepositoryHandle, "ExternalAssetNode"]] = []
-    unexecutable_node_pairs: List[Tuple[RepositoryHandle, "ExternalAssetNode"]] = []
-    for repo_handle, node in repo_handle_external_asset_nodes:
+    materializable_node_pairs: List[Tuple[RepositorySelector, "ExternalAssetNode"]] = []
+    observable_node_pairs: List[Tuple[RepositorySelector, "ExternalAssetNode"]] = []
+    unexecutable_node_pairs: List[Tuple[RepositorySelector, "ExternalAssetNode"]] = []
+    for repo_selector, node in repo_selector_external_asset_nodes:
         if node.is_source and node.is_observable:
-            observable_node_pairs.append((repo_handle, node))
+            observable_node_pairs.append((repo_selector, node))
         elif node.is_source:
-            unexecutable_node_pairs.append((repo_handle, node))
+            unexecutable_node_pairs.append((repo_selector, node))
         else:
-            materializable_node_pairs.append((repo_handle, node))
+            materializable_node_pairs.append((repo_selector, node))
 
     # It is possible for multiple nodes to exist that share the same key. This is invalid if
     # more than one node is materializable or if more than one node is observable. It is valid
@@ -423,17 +425,17 @@ def _warn_on_duplicate_nodes(
 
 
 def _warn_on_duplicates_within_subset(
-    node_pairs: Sequence[Tuple[RepositoryHandle, "ExternalAssetNode"]],
+    node_pairs: Sequence[Tuple[RepositorySelector, "ExternalAssetNode"]],
     execution_type: AssetExecutionType,
 ) -> None:
-    repo_handles_by_asset_key: DefaultDict[AssetKey, List[RepositoryHandle]] = defaultdict(list)
+    repo_handles_by_asset_key: DefaultDict[AssetKey, List[RepositorySelector]] = defaultdict(list)
     for repo_handle, node in node_pairs:
         repo_handles_by_asset_key[node.asset_key].append(repo_handle)
 
     duplicates = {k: v for k, v in repo_handles_by_asset_key.items() if len(v) > 1}
     duplicate_lines = []
-    for asset_key, repo_handles in duplicates.items():
-        locations = [repo_handle.code_location_origin.location_name for repo_handle in repo_handles]
+    for asset_key, selectors in duplicates.items():
+        locations = [selector.location_name for selector in selectors]
         duplicate_lines.append(f"  {asset_key.to_string()}: {locations}")
     duplicate_str = "\n".join(duplicate_lines)
     if duplicates:

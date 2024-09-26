@@ -34,6 +34,7 @@ from dagster._core.definitions.partition import PartitionsDefinition, Partitions
 from dagster._core.definitions.partition_key_range import PartitionKeyRange
 from dagster._core.definitions.partition_mapping import UpstreamPartitionsResult
 from dagster._core.definitions.remote_asset_graph import RemoteAssetGraph
+from dagster._core.definitions.selector import RepositorySelector
 from dagster._core.definitions.source_asset import SourceAsset
 from dagster._core.errors import DagsterDefinitionChangedDeserializationError
 from dagster._core.instance import DynamicPartitionsStore
@@ -51,10 +52,11 @@ def to_external_asset_graph(assets, asset_checks=None) -> BaseAssetGraph:
         return assets + (asset_checks or [])
 
     external_asset_nodes = external_asset_nodes_from_defs(repo.get_all_jobs(), repo.asset_graph)
-    return RemoteAssetGraph.from_repository_handles_and_external_asset_nodes(
-        [(MagicMock(), asset_node) for asset_node in external_asset_nodes],
+    selector = RepositorySelector(location_name="fake", repository_name="repo")
+    return RemoteAssetGraph.from_repository_selectors_and_external_asset_nodes(
+        [(selector, asset_node) for asset_node in external_asset_nodes],
         [
-            (MagicMock(), asset_check)
+            (selector, asset_check)
             for asset_check in external_asset_checks_from_defs(
                 repo.get_all_jobs(), repo.asset_graph
             )
@@ -886,9 +888,9 @@ def test_cross_code_location_partition_mapping() -> None:
 
     a_nodes = external_asset_nodes_from_defs([], AssetGraph.from_assets([a]))
     b_nodes = external_asset_nodes_from_defs([], AssetGraph.from_assets([b]))
-
-    asset_graph = RemoteAssetGraph.from_repository_handles_and_external_asset_nodes(
-        [(MagicMock(), asset_node) for asset_node in [*a_nodes, *b_nodes]], []
+    selector = RepositorySelector(location_name="foo", repository_name="bar")
+    asset_graph = RemoteAssetGraph.from_repository_selectors_and_external_asset_nodes(
+        [(selector, asset_node) for asset_node in [*a_nodes, *b_nodes]], []
     )
 
     assert isinstance(

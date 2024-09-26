@@ -9,12 +9,12 @@ from dagster._utils.error import SerializableErrorInfo
 
 if TYPE_CHECKING:
     from dagster._core.definitions.remote_asset_graph import RemoteAssetGraph
+    from dagster._core.definitions.selector import RepositorySelector
     from dagster._core.remote_representation import CodeLocation, CodeLocationOrigin
     from dagster._core.remote_representation.external_data import (
         ExternalAssetCheck,
         ExternalAssetNode,
     )
-    from dagster._core.remote_representation.handle import RepositoryHandle
 
 
 # For locations that are loaded asynchronously
@@ -66,16 +66,16 @@ class WorkspaceSnapshot:
             for code_location in code_locations
             for repo in code_location.get_repositories().values()
         )
-        repo_handle_assets: Sequence[Tuple["RepositoryHandle", "ExternalAssetNode"]] = []
-        repo_handle_asset_checks: Sequence[Tuple["RepositoryHandle", "ExternalAssetCheck"]] = []
+        repo_handle_assets: Sequence[Tuple["RepositorySelector", "ExternalAssetNode"]] = []
+        repo_handle_asset_checks: Sequence[Tuple["RepositorySelector", "ExternalAssetCheck"]] = []
 
         for repo in repos:
             for external_asset_node in repo.get_external_asset_nodes():
-                repo_handle_assets.append((repo.handle, external_asset_node))
+                repo_handle_assets.append((repo.selector, external_asset_node))
             for external_asset_check in repo.get_external_asset_checks():
-                repo_handle_asset_checks.append((repo.handle, external_asset_check))
+                repo_handle_asset_checks.append((repo.selector, external_asset_check))
 
-        return RemoteAssetGraph.from_repository_handles_and_external_asset_nodes(
+        return RemoteAssetGraph.from_repository_selectors_and_external_asset_nodes(
             repo_handle_assets=repo_handle_assets,
             repo_handle_asset_checks=repo_handle_asset_checks,
         )
