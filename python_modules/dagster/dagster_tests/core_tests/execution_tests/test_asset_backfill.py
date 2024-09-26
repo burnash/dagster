@@ -743,7 +743,7 @@ def external_asset_graph_from_assets_by_repo_name(
         repo = Definitions(assets=assets).get_repository_def()
 
         external_asset_nodes = external_asset_nodes_from_defs(repo.get_all_jobs(), repo.asset_graph)
-        selector = RepositorySelector(location_name="test", repository_name=repo.name)
+        selector = RepositorySelector(location_name="test", repository_name=repo_name)
         from_repository_selectors_and_external_asset_nodes.extend(
             [(selector, asset_node) for asset_node in external_asset_nodes]
         )
