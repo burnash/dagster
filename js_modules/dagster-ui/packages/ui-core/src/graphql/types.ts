@@ -3740,6 +3740,7 @@ export type Query = {
   runOrError: RunOrError;
   runTagKeysOrError: Maybe<RunTagKeysOrError>;
   runTagsOrError: Maybe<RunTagsOrError>;
+  runsFeedCountOrError: RunsFeedCountOrError;
   runsFeedOrError: RunsFeedConnectionOrError;
   runsOrError: RunsOrError;
   scheduleOrError: ScheduleOrError;
@@ -3953,6 +3954,10 @@ export type QueryRunTagsOrErrorArgs = {
   limit?: InputMaybe<Scalars['Int']['input']>;
   tagKeys?: InputMaybe<Array<Scalars['String']['input']>>;
   valuePrefix?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type QueryRunsFeedCountOrErrorArgs = {
+  filter?: InputMaybe<RunsFilter>;
 };
 
 export type QueryRunsFeedOrErrorArgs = {
@@ -4750,6 +4755,13 @@ export type RunsFeedConnection = {
 };
 
 export type RunsFeedConnectionOrError = PythonError | RunsFeedConnection;
+
+export type RunsFeedCount = {
+  __typename: 'RunsFeedCount';
+  count: Scalars['Int']['output'];
+};
+
+export type RunsFeedCountOrError = PythonError | RunsFeedCount;
 
 export type RunsFeedEntry = {
   assetCheckSelection: Maybe<Array<AssetCheckhandle>>;
@@ -12098,6 +12110,12 @@ export const buildQuery = (
         : relationshipsToOmit.has('PythonError')
         ? ({} as PythonError)
         : buildPythonError({}, relationshipsToOmit),
+    runsFeedCountOrError:
+      overrides && overrides.hasOwnProperty('runsFeedCountOrError')
+        ? overrides.runsFeedCountOrError!
+        : relationshipsToOmit.has('PythonError')
+        ? ({} as PythonError)
+        : buildPythonError({}, relationshipsToOmit),
     runsFeedOrError:
       overrides && overrides.hasOwnProperty('runsFeedOrError')
         ? overrides.runsFeedOrError!
@@ -13495,6 +13513,18 @@ export const buildRunsFeedConnection = (
     cursor: overrides && overrides.hasOwnProperty('cursor') ? overrides.cursor! : 'iure',
     hasMore: overrides && overrides.hasOwnProperty('hasMore') ? overrides.hasMore! : false,
     results: overrides && overrides.hasOwnProperty('results') ? overrides.results! : [],
+  };
+};
+
+export const buildRunsFeedCount = (
+  overrides?: Partial<RunsFeedCount>,
+  _relationshipsToOmit: Set<string> = new Set(),
+): {__typename: 'RunsFeedCount'} & RunsFeedCount => {
+  const relationshipsToOmit: Set<string> = new Set(_relationshipsToOmit);
+  relationshipsToOmit.add('RunsFeedCount');
+  return {
+    __typename: 'RunsFeedCount',
+    count: overrides && overrides.hasOwnProperty('count') ? overrides.count! : 1273,
   };
 };
 
