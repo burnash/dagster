@@ -29,7 +29,7 @@ from dagster_airlift.core.task_asset import (
     get_airflow_data_for_task_mapped_spec,
 )
 from dagster_airlift.core.utils import spec_iterator
-from dagster_airlift.migration_state import AirflowMigrationState
+from dagster_airlift.migration_state import AirflowProxiedState
 
 
 @record
@@ -110,7 +110,7 @@ def build_airlift_metadata_mapping_info(defs: Definitions) -> AirliftMetadataMap
 class FetchedAirflowData:
     dag_infos: Dict[str, DagInfo]
     task_info_map: Dict[str, Dict[str, TaskInfo]]
-    migration_state: AirflowMigrationState
+    migration_state: AirflowProxiedState
     mapping_info: AirliftMetadataMappingInfo
 
     @cached_property
@@ -120,7 +120,7 @@ class FetchedAirflowData:
             for task_handle in task_handles_for_spec(spec):
                 dag_id, task_id = task_handle
                 migration_state_map[task_handle.dag_id][task_handle.task_id] = None
-                migration_state_for_task = self.migration_state.get_migration_state_for_task(
+                migration_state_for_task = self.migration_state.get_task_proxied_state(
                     dag_id=dag_id, task_id=task_id
                 )
                 migration_state_map[dag_id][task_id] = migration_state_for_task
@@ -136,7 +136,7 @@ class FetchedAirflowData:
                     MappedAirflowTaskData(
                         task_handle=task_handle,
                         task_info=self.task_info_map[task_handle.dag_id][task_handle.task_id],
-                        migrated=self.migration_state_map[task_handle.dag_id][task_handle.task_id],
+                        proxied=self.migration_state_map[task_handle.dag_id][task_handle.task_id],
                     )
                     for task_handle in task_handles_for_spec(spec)
                 ],

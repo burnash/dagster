@@ -12,11 +12,7 @@ from dagster_airlift.core.serialization.compute import (
     fetch_all_airflow_data,
 )
 from dagster_airlift.core.utils import metadata_for_task_mapping
-from dagster_airlift.migration_state import (
-    AirflowMigrationState,
-    DagMigrationState,
-    TaskMigrationState,
-)
+from dagster_airlift.migration_state import AirflowProxiedState, DagProxiedState, TaskProxiedState
 from dagster_airlift.test import AirflowInstanceFake
 
 
@@ -145,12 +141,12 @@ def test_fetched_airflow_data() -> None:
                 ),
             }
         },
-        migration_state=AirflowMigrationState(
+        migration_state=AirflowProxiedState(
             dags={
-                "dag1": DagMigrationState(
+                "dag1": DagProxiedState(
                     {
-                        "task1": TaskMigrationState(task_id="task1", migrated=True),
-                        "task2": TaskMigrationState(task_id="task2", migrated=False),
+                        "task1": TaskProxiedState(task_id="task1", proxied=True),
+                        "task2": TaskProxiedState(task_id="task2", proxied=False),
                     }
                 )
             },

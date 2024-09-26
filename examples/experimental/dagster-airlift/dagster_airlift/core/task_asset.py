@@ -19,7 +19,7 @@ class TaskHandle(NamedTuple):
 class MappedAirflowTaskData:
     task_info: TaskInfo
     task_handle: TaskHandle
-    migrated: Optional[bool]
+    proxied: Optional[bool]
 
 
 @record
@@ -43,7 +43,7 @@ def get_airflow_data_for_task_mapped_spec(
 
 
 def tags_from_mapping(mapping: TasksToAssetMapping) -> Mapping[str, str]:
-    all_not_migrated = all(not task.migrated for task in mapping.mapped_tasks)
+    all_not_migrated = all(not task.proxied for task in mapping.mapped_tasks)
     # Only show the airflow kind if the asset is orchestrated exlusively by airflow
     return airflow_kind_dict() if all_not_migrated else {}
 
@@ -51,7 +51,7 @@ def tags_from_mapping(mapping: TasksToAssetMapping) -> Mapping[str, str]:
 def task_asset_metadata(mapping: TasksToAssetMapping) -> Mapping[str, Any]:
     # Just grab first one for now
     mapped_task = mapping.mapped_tasks[0]
-    task_info, migration_state = mapped_task.task_info, mapped_task.migrated
+    task_info, migration_state = mapped_task.task_info, mapped_task.proxied
     task_level_metadata = {
         "Task Info (raw)": JsonMetadataValue(task_info.metadata),
         # In this case,
