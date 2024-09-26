@@ -29,7 +29,7 @@ from dagster_airlift.core.task_asset import (
     get_airflow_data_for_task_mapped_spec,
 )
 from dagster_airlift.core.utils import spec_iterator
-from dagster_airlift.migration_state import AirflowProxiedState
+from dagster_airlift.proxied_state import AirflowProxiedState
 
 
 @record
@@ -110,21 +110,21 @@ def build_airlift_metadata_mapping_info(defs: Definitions) -> AirliftMetadataMap
 class FetchedAirflowData:
     dag_infos: Dict[str, DagInfo]
     task_info_map: Dict[str, Dict[str, TaskInfo]]
-    migration_state: AirflowProxiedState
+    proxied_state: AirflowProxiedState
     mapping_info: AirliftMetadataMappingInfo
 
     @cached_property
-    def migration_state_map(self) -> Dict[str, Dict[str, Optional[bool]]]:
-        migration_state_map: Dict[str, Dict[str, Optional[bool]]] = defaultdict(dict)
+    def proxied_state_map(self) -> Dict[str, Dict[str, Optional[bool]]]:
+        proxied_state_map: Dict[str, Dict[str, Optional[bool]]] = defaultdict(dict)
         for spec in self.mapping_info.mapped_asset_specs:
             for task_handle in task_handles_for_spec(spec):
                 dag_id, task_id = task_handle
-                migration_state_map[task_handle.dag_id][task_handle.task_id] = None
-                migration_state_for_task = self.migration_state.get_task_proxied_state(
+                proxied_state_map[task_handle.dag_id][task_handle.task_id] = None
+                proxied_state_for_task = self.proxied_state.get_task_proxied_state(
                     dag_id=dag_id, task_id=task_id
                 )
-                migration_state_map[dag_id][task_id] = migration_state_for_task
-        return migration_state_map
+                proxied_state_map[dag_id][task_id] = proxied_state_for_task
+        return proxied_state_map
 
     @cached_property
     def airflow_data_by_key(self) -> Dict[AssetKey, SerializedAssetKeyScopedAirflowData]:
@@ -136,7 +136,7 @@ class FetchedAirflowData:
                     MappedAirflowTaskData(
                         task_handle=task_handle,
                         task_info=self.task_info_map[task_handle.dag_id][task_handle.task_id],
-                        proxied=self.migration_state_map[task_handle.dag_id][task_handle.task_id],
+                        proxied=self.proxied_state_map[task_handle.dag_id][task_handle.task_id],
                     )
                     for task_handle in task_handles_for_spec(spec)
                 ],
@@ -158,12 +158,12 @@ def fetch_all_airflow_data(
             for task_info in airflow_instance.get_task_infos(dag_id=dag_id)
         }
 
-    migration_state = airflow_instance.get_migration_state()
+    proxied_state = airflow_instance.get_proxied_state()
 
     return FetchedAirflowData(
         dag_infos=dag_infos,
         task_info_map=task_info_map,
-        migration_state=migration_state,
+        proxied_state=proxied_state,
         mapping_info=mapping_info,
     )
 
@@ -207,7 +207,7 @@ def compute_serialized_data(
         task_handle_data = {}
         for task_id in mapping_info.task_id_map[dag_id]:
             task_handle_data[task_id] = SerializedTaskHandleData(
-                migration_state=fetched_airflow_data.migration_state_map[dag_id].get(task_id),
+                proxied_state=fetched_airflow_data.proxied_state_map[dag_id].get(task_id),
                 asset_keys_in_task=mapping_info.asset_key_map[dag_id][task_id],
             )
         dag_datas[dag_id] = SerializedDagData(

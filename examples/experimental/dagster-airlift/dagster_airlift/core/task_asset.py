@@ -43,15 +43,15 @@ def get_airflow_data_for_task_mapped_spec(
 
 
 def tags_from_mapping(mapping: TasksToAssetMapping) -> Mapping[str, str]:
-    all_not_migrated = all(not task.proxied for task in mapping.mapped_tasks)
+    all_not_proxied = all(not task.proxied for task in mapping.mapped_tasks)
     # Only show the airflow kind if the asset is orchestrated exlusively by airflow
-    return airflow_kind_dict() if all_not_migrated else {}
+    return airflow_kind_dict() if all_not_proxied else {}
 
 
 def task_asset_metadata(mapping: TasksToAssetMapping) -> Mapping[str, Any]:
     # Just grab first one for now
     mapped_task = mapping.mapped_tasks[0]
-    task_info, migration_state = mapped_task.task_info, mapped_task.proxied
+    task_info, proxied_state = mapped_task.task_info, mapped_task.proxied
     task_level_metadata = {
         "Task Info (raw)": JsonMetadataValue(task_info.metadata),
         # In this case,
@@ -59,6 +59,6 @@ def task_asset_metadata(mapping: TasksToAssetMapping) -> Mapping[str, Any]:
         "Link to DAG": UrlMetadataValue(task_info.dag_url),
     }
     task_level_metadata[
-        "Computed in Task ID" if not migration_state else "Triggered by Task ID"
+        "Computed in Task ID" if not proxied_state else "Triggered by Task ID"
     ] = task_info.task_id
     return task_level_metadata

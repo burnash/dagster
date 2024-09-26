@@ -11,12 +11,12 @@ from dagster._core.errors import DagsterError
 from dagster._record import record
 from dagster._time import get_current_datetime
 
-from dagster_airlift.migration_state import (
+from dagster_airlift.proxied_state import (
     AirflowProxiedState,
     DagProxiedState,
-    load_migration_state_from_yaml,
+    load_proxied_state_from_yaml,
 )
-from dagster_airlift.utils import get_local_migration_state_dir
+from dagster_airlift.utils import get_local_proxied_state_dir
 
 from .utils import convert_to_valid_dagster_name
 
@@ -87,17 +87,17 @@ class AirflowInstance:
                 "Failed to fetch variables. Status code: {response.status_code}, Message: {response.text}"
             )
 
-    def get_migration_state(self) -> AirflowProxiedState:
-        local_migration_dir = get_local_migration_state_dir()
-        if local_migration_dir is not None:
-            return load_migration_state_from_yaml(local_migration_dir)
+    def get_proxied_state(self) -> AirflowProxiedState:
+        local_proxied_dir = get_local_proxied_state_dir()
+        if local_proxied_dir is not None:
+            return load_proxied_state_from_yaml(local_proxied_dir)
         variables = self.list_variables()
         dag_dict = {}
         for var_dict in variables:
-            if var_dict["key"].endswith("_dagster_migration_state"):
-                dag_id = var_dict["key"].replace("_dagster_migration_state", "")
-                migration_dict = json.loads(var_dict["value"])
-                dag_dict[dag_id] = DagProxiedState.from_dict(migration_dict)
+            if var_dict["key"].endswith("_dagster_proxied_state"):
+                dag_id = var_dict["key"].replace("_dagster_proxied_state", "")
+                proxied_dict = json.loads(var_dict["value"])
+                dag_dict[dag_id] = DagProxiedState.from_dict(proxied_dict)
         return AirflowProxiedState(dags=dag_dict)
 
     def get_task_instance_batch(

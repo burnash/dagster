@@ -120,7 +120,7 @@ class SerializedDagData:
 class SerializedTaskHandleData:
     """A record containing known data about a given airflow task handle."""
 
-    migration_state: Optional[bool]
+    proxied_state: Optional[bool]
     asset_keys_in_task: AbstractSet[AssetKey]
 
 
