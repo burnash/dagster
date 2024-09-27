@@ -4979,6 +4979,27 @@ export type Sensor = {
   id: Scalars['ID']['output'];
   jobOriginId: Scalars['String']['output'];
   metadata: SensorMetadata;
+  metadataEntries: Array<
+    | AssetMetadataEntry
+    | BoolMetadataEntry
+    | CodeReferencesMetadataEntry
+    | FloatMetadataEntry
+    | IntMetadataEntry
+    | JobMetadataEntry
+    | JsonMetadataEntry
+    | MarkdownMetadataEntry
+    | NotebookMetadataEntry
+    | NullMetadataEntry
+    | PathMetadataEntry
+    | PipelineRunMetadataEntry
+    | PythonArtifactMetadataEntry
+    | TableColumnLineageMetadataEntry
+    | TableMetadataEntry
+    | TableSchemaMetadataEntry
+    | TextMetadataEntry
+    | TimestampMetadataEntry
+    | UrlMetadataEntry
+  >;
   minIntervalSeconds: Scalars['Int']['output'];
   name: Scalars['String']['output'];
   nextTick: Maybe<DryRunInstigationTick>;
@@ -13989,6 +14010,8 @@ export const buildSensor = (
         : relationshipsToOmit.has('SensorMetadata')
         ? ({} as SensorMetadata)
         : buildSensorMetadata({}, relationshipsToOmit),
+    metadataEntries:
+      overrides && overrides.hasOwnProperty('metadataEntries') ? overrides.metadataEntries! : [],
     minIntervalSeconds:
       overrides && overrides.hasOwnProperty('minIntervalSeconds')
         ? overrides.minIntervalSeconds!
